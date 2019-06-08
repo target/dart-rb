@@ -1,0 +1,21 @@
+#!/usr/bin/env ruby
+
+require "bundler/setup"
+require "dart"
+
+path = '/Users/z002022/git/libdart_dev/deps/libdart/benchmark/input.json'
+packets = File.foreach(path).map { |line| Dart.from_json(line.chomp) }
+
+count = 0
+prev = Time.now
+loop do
+  packets.each { |pkt| pkt.to_json }
+  count += packets.size
+
+  curr = Time.now
+  if curr - prev > 1
+    puts "Parsed #{count} packets/second"
+    count = 0
+    prev = curr
+  end
+end
