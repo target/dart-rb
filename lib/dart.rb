@@ -6,7 +6,74 @@ module Dart
 
   class Packet
     def initialize(ptr)
+      raise ArgumentError, 'Cannot initialize with nil' if ptr.nil?
       @native = ptr
+    end
+
+    def [](key)
+
+    end
+
+    def []=(key, value)
+      
+    end
+
+    #----- Introspection Methods -----#
+    
+    def obj?
+      get_type == :object
+    end
+
+    def object?
+      obj?
+    end
+
+    def arr?
+      get_type == :array
+    end
+
+    def array?
+      arr?
+    end
+
+    def str?
+      get_type == :string
+    end
+
+    def string?
+      str?
+    end
+
+    def int?
+      get_type == :integer
+    end
+
+    def integer?
+      int?
+    end
+
+    def decimal?
+      get_type == :decimal
+    end
+
+    def dcm?
+      decimal?
+    end
+
+    def bool?
+      get_type == :boolean
+    end
+
+    def boolean?
+      bool?
+    end
+
+    def null?
+      get_type == :null
+    end
+
+    def get_type
+      FFI::.dart_get_type(@native)
     end
 
     def self.from_json(str)
