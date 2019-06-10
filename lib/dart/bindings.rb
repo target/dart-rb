@@ -115,10 +115,10 @@ module Dart
 
       def lookup(key)
         # Make sure we've been given something we can use.
-        enforce_types(key, object: [String, Symbol], array: Fixnum)
+        enforce_types(key, object: [::String, ::Symbol], array: ::Fixnum)
 
         # Perform the lookup.
-        key = key.is_a?(Symbol) ? key.to_s : key
+        key = key.is_a?(::Symbol) ? key.to_s : key
         ptr = self.class.alloc
         raising_errors do
           if obj?
@@ -147,10 +147,10 @@ module Dart
 
       def remove(key)
         # Make sure we've been given something we can use.
-        enforce_types(key, object: [String, Symbol], array: Fixnum)
+        enforce_types(key, object: [::String, ::Symbol], array: ::Fixnum)
 
         # Remove the key.
-        key = key.is_a?(Symbol) ? key.to_s : key
+        key = key.is_a?(::Symbol) ? key.to_s : key
         raising_errors do
           if obj?
             FFI.dart_obj_erase_len(self, key, key.size)
@@ -159,6 +159,15 @@ module Dart
           end
         end
         nil
+      end
+
+      def resize(len)
+        # Make sure we've been given something we can use.
+        enforce_types(len, array: [::Fixnum])
+
+        # Perform the resize.
+        FFI.dart_arr_resize(self, len)
+        size
       end
 
       def unwrap
@@ -311,7 +320,7 @@ module Dart
 
       def self.from_bytes(bytes)
         # Make sure we've been given something reasonable.
-        raise ArgumentError, 'Can only reconstruct Dart object from a buffer of bytes' unless bytes.is_a?(String)
+        raise ArgumentError, 'Can only reconstruct Dart object from a buffer of bytes' unless bytes.is_a?(::String)
 
         # Unfortunately we have to copy here.
         # We're constrained by the API Ruby FFI exposes.
@@ -358,6 +367,7 @@ module Dart
       #----- Language Overrides -----#
 
       def ==(other)
+        return true if equal?(other)
         return false unless other.is_a?(Packet)
         FFI.dart_equal(self, other) == 1
       end
@@ -383,7 +393,7 @@ module Dart
         # Check that the argument is of the right type
         req = types[get_type]
         unless req.nil?
-          req = req.is_a?(Array) ? req : [req]
+          req = req.is_a?(::Array) ? req : [req]
           req.each { |type| return if arg.is_a?(type) }
           raise TypeError, "`#{caller_name}' must be called with an instance of [`#{req.join("', `")}']"
         end
@@ -391,17 +401,17 @@ module Dart
 
       #----- Native Memory Helpers -----#
 
-      def convert(val)
+      def self.convert(val)
         case val
         when Packet then val
-        when Hash then const_obj.tap { |p| val.each_pair { |k, v| p.insert(k, v) } }
-        when Array then const_arr.tap { |p| val.each.with_index { |v, i| p.insert(i, v) } }
-        when String then const_str(val)
-        when Symbol then const_str(val.to_s)
-        when Fixnum then const_primitive(val, :int)
-        when Float then const_primitive(val, :dcm)
-        when TrueClass, FalseClass then const_primitive(val ? 1 : 0, :bool)
-        when NilClass then const_null
+        when ::Hash then make_obj.tap { |p| val.each_pair { |k, v| p.insert(k, v) } }
+        when ::Array then make_arr.tap { |p| val.each.with_index { |v, i| p.insert(i, v) } }
+        when ::String then make_str(val)
+        when ::Symbol then make_str(val.to_s)
+        when ::Fixnum then make_primitive(val, :int)
+        when ::Float then make_primitive(val, :dcm)
+        when ::TrueClass, ::FalseClass then make_primitive(val ? 1 : 0, :bool)
+        when ::NilClass then make_null
         else raise TypeError, "Dart cannot convert value of type `#{val.class.name}'"
         end
       end
@@ -422,58 +432,58 @@ module Dart
         @double_cache ||= ::FFI::MemoryPointer.new(FFI::Double)
       end
 
-      def alloc_obj
-        ptr = self.class.alloc
+      def self.alloc_obj
+        ptr = alloc
         raising_errors { FFI.dart_obj_init_err(ptr) }
         ptr.mark_valid
         ptr
       end
 
-      def const_obj
+      def self.make_obj
         Packet.new(alloc_obj)
       end
 
-      def alloc_arr
-        ptr = self.class.alloc
+      def self.alloc_arr
+        ptr = alloc
         raising_errors { FFI.dart_arr_init_err(ptr) }
         ptr.mark_valid
         ptr
       end
 
-      def const_arr
+      def self.make_arr
         Packet.new(alloc_arr)
       end
 
-      def alloc_str(str)
-        ptr = self.class.alloc
+      def self.alloc_str(str)
+        ptr = alloc
         raising_errors { FFI.dart_str_init_err(ptr, str, str.size) }
         ptr.mark_valid
         ptr
       end
 
-      def const_str(str)
+      def self.make_str(str)
         Packet.new(alloc_str(str))
       end
 
-      def alloc_primitive(arg, type)
-        ptr = self.class.alloc
+      def self.alloc_primitive(arg, type)
+        ptr = alloc
         raising_errors { FFI.send("dart_#{type}_init_err", ptr, arg) }
         ptr.mark_valid
         ptr
       end
 
-      def const_primitive(arg, type)
+      def self.make_primitive(arg, type)
         Packet.new(alloc_primitive(arg, type))
       end
 
-      def alloc_null
-        ptr = self.class.alloc
+      def self.alloc_null
+        ptr = alloc
         raising_errors { FFI.dart_null_init_err(ptr) }
         ptr.mark_valid
         ptr
       end
 
-      def const_null
+      def self.make_null
         Packet.new(alloc_null)
       end
 
@@ -485,11 +495,11 @@ module Dart
 
       def mutate(key, val, obj:, arr:)
         # Make sure we've been given something we can use.
-        enforce_types(key, object: [String, Symbol], array: Fixnum)
+        enforce_types(key, object: [::String, ::Symbol], array: ::Fixnum)
 
         # Convert the value we've been given to insert it.
-        key = key.is_a?(Symbol) ? key.to_s : key
-        raw_val = convert(val)
+        key = key.is_a?(::Symbol) ? key.to_s : key
+        raw_val = self.class.convert(val)
         raising_errors do
           if obj?
             FFI.send(obj, self, key, key.size, raw_val)
@@ -557,6 +567,9 @@ module Dart
 
     # Attach array erase functions.
     attach_function :dart_arr_erase, [:pointer, :size_t], ErrorType
+
+    # Attach array resize functions.
+    attach_function :dart_arr_resize, [:pointer, :size_t], ErrorType
 
     # Attach array retrieval functions.
     attach_function :dart_arr_get_err, [:pointer, :pointer, :size_t], ErrorType
