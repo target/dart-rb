@@ -89,6 +89,12 @@ module Dart
       Helpers.construct_child(@impl.dup)
     end
 
+    private
+
+    def native
+      @impl
+    end
+
   end
 
   class Object
@@ -129,6 +135,10 @@ module Dart
       @impl.size
     end
 
+    def empty?
+      size == 0
+    end
+
     def lower
       @impl = @impl.lower
     end
@@ -145,18 +155,37 @@ module Dart
       lift
     end
 
-    def each(&block)
-      # Get an iterator from our implementation
-      it = @impl.iterator
-      key_it = @impl.key_iterator
+    #----- Language Overrides -----#
 
-      # Call our block for each child.
-      while it.has_next
-        key = Helpers.construct_child(key_it.unwrap)
-        val = Helpers.construct_child(it.unwrap)
-        block.call(key, val)
-        it.next
-        key_it.next
+    def ==(other)
+      return true if equal?(other)
+      case other
+      when Object then @impl == other.send(:native)
+      when ::Hash then size == other.size && other.each { |k, v| return false unless self[k] == v } && true
+      else false
+      end
+    end
+
+    def each
+      # Create an enumerator to either consume or return.
+      enum = Enumerator.new do |y|
+        # Get an iterator from our implementation
+        it = @impl.iterator
+        key_it = @impl.key_iterator
+
+        # Call our block for each child.
+        while it.has_next
+          key = Helpers.construct_child(key_it.unwrap)
+          val = Helpers.construct_child(it.unwrap)
+          y.yield(key, val)
+          it.next
+          key_it.next
+        end
+      end
+
+      # Check if we can consume the enumerator.
+      if block_given? then enum.each { |k, v| yield(k, v) } && self
+      else enum
       end
     end
   end
@@ -227,21 +256,40 @@ module Dart
       size == 0
     end
 
-    def each(&block)
-      # Get an iterator from our implementation
-      it = @impl.iterator
+    #----- Language Overrides -----#
 
-      # Call our block for each child.
-      while it.has_next
-        block.call(Helpers.construct_child(it.unwrap))
-        it.next
+    def ==(other)
+      return true if equal?(other)
+      case other
+      when Array then @impl == other.send(:native)
+      when ::Array then size == other.size && each.with_index { |v, i| return false unless v == other[i] } && true
+      else false
+      end
+    end
+
+    def each
+      # Create an enumerator to either consume or return.
+      enum = Enumerator.new do |y|
+        # Get an iterator from our implementation
+        it = @impl.iterator
+
+        # Call our block for each child.
+        while it.has_next
+          y << Helpers.construct_child(it.unwrap)
+          it.next
+        end
+      end
+
+      # Check if we can consume the enumerator.
+      if block_given? then enum.each { |v| yield v } && self
+      else enum
       end
     end
   end
 
   module Unwrappable
     def unwrap
-      @impl.unwrap
+      @unwrapped ||= @impl.unwrap
     end
   end
 
@@ -256,6 +304,15 @@ module Dart
         # Create our implementation as the given string.
         raise ArgumentError, 'Dart::String can only be constructed from a String' unless val.is_a?(::String)
         @impl = Dart::FFI::Packet.make_str(val)
+      end
+    end
+
+    def ==(other)
+      return true if equal?(other)
+      case other
+      when String then @impl == other.send(:native)
+      when ::String then unwrap == other
+      else false
       end
     end
   end
@@ -273,6 +330,15 @@ module Dart
         @impl = Dart::FFI::Packet.make_primitive(val, :int)
       end
     end
+
+    def ==(other)
+      return true if equal?(other)
+      case other
+      when Integer then @impl == other.send(:native)
+      when ::Fixnum then unwrap == other
+      else false
+      end
+    end
   end
 
   class Decimal
@@ -286,6 +352,15 @@ module Dart
         # Create our implementation as the given decimal.
         raise ArgumentError, 'Dart::Decimal can only be constructed from a Float' unless val.is_a?(::Float)
         @impl = Dart::FFI::Packet.make_primitive(val, :dcm)
+      end
+    end
+
+    def ==(other)
+      return true if equal?(other)
+      case other
+      when Decimal then @impl == other.send(:native)
+      when ::Float then unwrap == other
+      else false
       end
     end
   end
@@ -305,6 +380,16 @@ module Dart
         @impl = Dart::FFI::Packet.make_primitive(val ? 1 : 0, :bool)
       end
     end
+
+    def ==(other)
+      return true if equal?(other)
+      case other
+      when Boolean then @impl == other.send(:native)
+      when ::TrueClass then unwrap
+      when ::FalseClass then !unwrap
+      else false
+      end
+    end
   end
 
   class Null
@@ -312,6 +397,15 @@ module Dart
 
     def initialize
       @impl = Dart::FFI::Packet.make_null
+    end
+
+    def ==(other)
+      return true if equal?(other)
+      case other
+      when Null then true
+      when NilClass then true
+      else false
+      end
     end
   end
 
@@ -323,4 +417,20 @@ module Dart
     Helpers.construct_child(Dart::FFI::Packet.from_bytes(bytes))
   end
 
+  module Patch
+    def ==(other)
+      if other.is_a?(Dart::Common) then other == self
+      else super
+      end
+    end
+  end
+
+end
+
+class Hash
+  prepend Dart::Patch
+end
+
+class Array
+  prepend Dart::Patch
 end
