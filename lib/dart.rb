@@ -106,6 +106,8 @@ module Dart
   end
 
   class Object < Base
+    include Enumerable
+
     def initialize(val = nil)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -148,9 +150,26 @@ module Dart
     def definalize
       lift
     end
+
+    def each(&block)
+      # Get an iterator from our implementation
+      it = @impl.iterator
+      key_it = @impl.key_iterator
+
+      # Call our block for each child.
+      while it.has_next
+        key = self.class.construct_child(key_it.unwrap)
+        val = self.class.construct_child(it.unwrap)
+        block.call(key, val)
+        it.next
+        key_it.next
+      end
+    end
   end
 
   class Array < Base
+    include Enumerable
+
     def initialize(val = nil)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -172,18 +191,68 @@ module Dart
       self.class.construct_child(@impl.update(idx, elem))
     end
 
-    def insert(idx, elem)
+    def insert(idx, *elems)
       raise ArgumentError, 'Dart Arrays can only index with an integer' unless idx.is_a?(::Fixnum)
+
+      # Iterate over the supplied elements and insert them.
       @impl.resize(idx) if idx > size
-      self.class.construct_child(@impl.insert(idx, elem))
+      elems.each.with_index { |v, i| @impl.insert(idx + i, v) }
+      self
+    end
+
+    def delete_at(idx)
+      val = self[idx]
+      @impl.remove(idx)
+      val
+    end
+
+    def unshift(*elems)
+      insert(0, *elems)
+    end
+
+    def shift
+      delete_at(0) unless empty?
+    end
+
+    def push(*elems)
+      insert(size, *elems)
+    end
+
+    def pop
+      delete_at(size - 1) unless empty?
     end
 
     def size
       @impl.size
     end
+
+    def empty?
+      size == 0
+    end
+
+    def each(&block)
+      # Get an iterator from our implementation
+      it = @impl.iterator
+
+      # Call our block for each child.
+      while it.has_next
+        block.call(self.class.construct_child(it.unwrap))
+        it.next
+      end
+    end
   end
 
-  class String < Base
+  class Unwrappable < Base
+    def initialize(*args)
+      super(*args)
+    end
+
+    def unwrap
+      @impl.unwrap
+    end
+  end
+
+  class String < Unwrappable
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -195,7 +264,7 @@ module Dart
     end
   end
 
-  class Integer < Base
+  class Integer < Unwrappable
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -207,7 +276,7 @@ module Dart
     end
   end
 
-  class Decimal < Base
+  class Decimal < Unwrappable
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -219,7 +288,7 @@ module Dart
     end
   end
 
-  class Boolean < Base
+  class Boolean < Unwrappable
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val

@@ -99,6 +99,55 @@ module Dart
     class Iterator < DartStruct
       layout :rtti, TypeID, :bytes, [:char, ITERATOR_MAX_SIZE]
 
+      extend Errors
+      include Errors
+
+      def has_next
+        FFI.dart_iterator_done(self) != 1
+      end
+
+      def next
+        raising_errors { FFI.dart_iterator_next(self) }
+      end
+
+      def unwrap
+        # Allocate a raw packet object.
+        ptr = Packet.alloc
+
+        # Dereference ourself into the packet.
+        raising_errors { FFI.dart_iterator_get_err(ptr, self) }
+        ptr.mark_valid
+
+        # Wrap the pointer and return
+        Packet.new(ptr)
+      end
+
+      def self.bind(pkt)
+        # Validate that we're binding against a packet.
+        raise ArgumentError, 'Dart iterator can only be created from a Dart packet' unless pkt.is_a?(Packet)
+
+        # Initialize a raw iterator.
+        ptr = alloc
+        raising_errors { FFI.dart_iterator_init_err(ptr, pkt) }
+        ptr.mark_valid
+
+        # Wrap the pointer and return.
+        new(ptr)
+      end
+
+      def self.key_bind(pkt)
+        # Validate that we're binding against a packet.
+        raise ArgumentError, 'Dart iterator can only be created from a Dart packet' unless pkt.is_a?(Packet)
+
+        # Initialize a raw iterator.
+        ptr = alloc
+        raising_errors { FFI.dart_iterator_init_key_err(ptr, pkt) }
+        ptr.mark_valid
+
+        # Wrap the pointer and return.
+        new(ptr)
+      end
+
       def self.destructor(ptr)
         FFI.dart_iterator_destroy(ptr)
       end
@@ -168,6 +217,22 @@ module Dart
         # Perform the resize.
         FFI.dart_arr_resize(self, len)
         size
+      end
+
+      def iterator
+        # Make sure we can iterate.
+        enforce_types(nil, object: nil, array: nil)
+
+        # Bind an iterator to ourself.
+        Iterator.bind(self)
+      end
+
+      def key_iterator
+        # Make sure we can iterate.
+        enforce_types(nil, object: nil, array: nil)
+
+        # Bind an iterator to ourself.
+        Iterator.key_bind(self)
       end
 
       def unwrap
