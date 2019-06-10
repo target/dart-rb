@@ -1,10 +1,11 @@
 require 'dart/version'
 require 'dart/errors'
 require 'dart/bindings'
+require 'dart/helpers'
 
 module Dart
 
-  class Base
+  module Common
 
     #----- Introspection Methods -----#
 
@@ -85,46 +86,39 @@ module Dart
     end
 
     def dup
-      self.class.construct_child(@impl.dup)
-    end
-
-    #----- Private Helpers -----#
-
-    def self.construct_child(raw)
-      case raw.get_type
-      when :object then Object.new(raw)
-      when :array then Array.new(raw)
-      when :string then String.new(raw)
-      when :integer then Integer.new(raw)
-      when :decimal then Decimal.new(raw)
-      when :boolean then Boolean.new(raw)
-      when :null then Null.new
-      else raise InternalError, 'Encountered unexpected type while constructing child'
-      end
+      Helpers.construct_child(@impl.dup)
     end
 
   end
 
-  class Object < Base
+  class Object
     include Enumerable
+    include Common
 
-    def initialize(val = nil)
+    def initialize(val = nil, &block)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
-      elsif val.nil?
+      elsif block
+        @def_val = proc { |h, k| block.call(h, k) }
         @impl = Dart::FFI::Packet.make_obj
       else
-        @impl = Dart::FFI::Packet.convert(val)
+        @def_val = proc { Helpers.construct_child(Dart::FFI::Packet.convert(val)) }
+        @impl = Dart::FFI::Packet.make_obj
       end
-      raise ArgumentError, 'Dart::Object can only be contructed as an object' unless obj?
     end
 
     def [](key)
-      self.class.construct_child(@impl.lookup(key))
+      if has_key?(key) then Helpers.construct_child(@impl.lookup(key))
+      else @def_val.call(self, key)
+      end
     end
 
     def []=(key, value)
-      self.class.construct_child(@impl.update(key, value))
+      Helpers.construct_child(@impl.update(key, value))
+    end
+
+    def has_key?(key)
+      @impl.has_key?(key)
     end
 
     def insert(key, value)
@@ -158,8 +152,8 @@ module Dart
 
       # Call our block for each child.
       while it.has_next
-        key = self.class.construct_child(key_it.unwrap)
-        val = self.class.construct_child(it.unwrap)
+        key = Helpers.construct_child(key_it.unwrap)
+        val = Helpers.construct_child(it.unwrap)
         block.call(key, val)
         it.next
         key_it.next
@@ -167,28 +161,31 @@ module Dart
     end
   end
 
-  class Array < Base
+  class Array
     include Enumerable
+    include Common
 
-    def initialize(val = nil)
-      if val.is_a?(Dart::FFI::Packet)
-        @impl = val
-      elsif val.nil?
+    def initialize(val_or_size = nil, def_val = nil)
+      if val_or_size.is_a?(Dart::FFI::Packet) && def_val.nil?
+        @impl = val_or_size
+      elsif val_or_size.is_a?(Fixnum)
         @impl = Dart::FFI::Packet.make_arr
+        if def_val.nil? then @impl.resize(val_or_size)
+        else val_or_size.times { push(def_val) }
+        end
       else
-        @impl = Dart::FFI::Packet.convert(val)
+        @impl = Dart::FFI::Packet.make_arr
       end
-      raise ArgumentError, 'Dart::Array can only be contructed as an array' unless arr?
     end
 
     def [](idx)
-      self.class.construct_child(@impl.lookup(idx))
+      Helpers.construct_child(@impl.lookup(idx))
     end
 
     def []=(idx, elem)
       raise ArgumentError, 'Dart Arrays can only index with an integer' unless idx.is_a?(::Fixnum)
       @impl.resize(idx + 1) if idx >= size
-      self.class.construct_child(@impl.update(idx, elem))
+      Helpers.construct_child(@impl.update(idx, elem))
     end
 
     def insert(idx, *elems)
@@ -236,23 +233,22 @@ module Dart
 
       # Call our block for each child.
       while it.has_next
-        block.call(self.class.construct_child(it.unwrap))
+        block.call(Helpers.construct_child(it.unwrap))
         it.next
       end
     end
   end
 
-  class Unwrappable < Base
-    def initialize(*args)
-      super(*args)
-    end
-
+  module Unwrappable
     def unwrap
       @impl.unwrap
     end
   end
 
-  class String < Unwrappable
+  class String
+    include Common
+    include Unwrappable
+
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -264,7 +260,10 @@ module Dart
     end
   end
 
-  class Integer < Unwrappable
+  class Integer
+    include Common
+    include Unwrappable
+
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -276,7 +275,10 @@ module Dart
     end
   end
 
-  class Decimal < Unwrappable
+  class Decimal
+    include Common
+    include Unwrappable
+
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -288,7 +290,10 @@ module Dart
     end
   end
 
-  class Boolean < Unwrappable
+  class Boolean
+    include Common
+    include Unwrappable
+
     def initialize(val)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
@@ -302,18 +307,20 @@ module Dart
     end
   end
 
-  class Null < Base
+  class Null
+    include Common
+
     def initialize
       @impl = Dart::FFI::Packet.make_null
     end
   end
 
   def self.from_json(str, finalize = true)
-    Base.construct_child(Dart::FFI::Packet.from_json(str, finalize))
+    Helpers.construct_child(Dart::FFI::Packet.from_json(str, finalize))
   end
 
   def self.from_bytes(bytes)
-    Base.construct_child(Dart::FFI::Packet.from_bytes(bytes))
+    Helpers.construct_child(Dart::FFI::Packet.from_bytes(bytes))
   end
 
 end

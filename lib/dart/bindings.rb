@@ -182,6 +182,15 @@ module Dart
         self.class.new(ptr)
       end
 
+      def has_key?(key)
+        # Make sure we've been given something we can use.
+        enforce_types(key, object: [::String, ::Symbol])
+
+        # Check if we have the requested key.
+        key = key.is_a?(::Symbol) ? key.to_s : key
+        FFI.dart_obj_has_key_len(self, key, key.size) == 1
+      end
+
       def insert(key, val)
         mutate(key, val, obj: :dart_obj_insert_dart_len, arr: :dart_arr_insert_dart)
       end
@@ -620,6 +629,7 @@ module Dart
     attach_function :dart_obj_erase_len, [:pointer, :string, :size_t], ErrorType
 
     # Attach object retrieval functions.
+    attach_function :dart_obj_has_key_len, [:pointer, :string, :size_t], :int
     attach_function :dart_obj_get_len_err, [:pointer, :pointer, :string, :size_t], ErrorType
 
     # Attach array insertion operations.
