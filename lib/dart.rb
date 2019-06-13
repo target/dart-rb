@@ -2,6 +2,8 @@ require 'dart/version'
 require 'dart/errors'
 require 'dart/bindings'
 require 'dart/helpers'
+require 'dart/convert'
+require 'dart/cached'
 
 module Dart
 
@@ -86,7 +88,7 @@ module Dart
     end
 
     def dup
-      Helpers.construct_child(@impl.dup)
+      Helpers.wrap_ffi(@impl.dup)
     end
 
     private
@@ -97,38 +99,65 @@ module Dart
 
   end
 
+  module Numeric
+    ops = %w{ + - / * }.each do |op|
+      eval <<-METHOD
+      def #{op}(num)
+        if num.is_a?(Numeric) then unwrap #{op} num.unwrap
+        else unwrap #{op} num
+        end
+      end
+      METHOD
+    end
+
+    def coerce(num)
+      [dup, num]
+    end
+  end
+
+  module Unwrappable
+    def unwrap
+      @unwrapped ||= @impl.unwrap
+    end
+  end
+
   class Object
     include Enumerable
+    include Convert
     include Common
+    prepend Cached
 
-    def initialize(val = nil, &block)
+    def initialize(val = nil)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
-      elsif block
-        @def_val = proc { |h, k| block.call(h, k) }
+      elsif block_given?
+        @def_val = proc { |h, k| yield(h, k) }
         @impl = Dart::FFI::Packet.make_obj
       else
-        @def_val = proc { Helpers.construct_child(Dart::FFI::Packet.convert(val)) }
+        @def_val = proc { Helpers.wrap_ffi(Dart::FFI::Packet.convert(val)) }
         @impl = Dart::FFI::Packet.make_obj
       end
     end
 
     def [](key)
-      if has_key?(key) then Helpers.construct_child(@impl.lookup(key))
+      if has_key?(key) then @impl.lookup(key)
       else @def_val.call(self, key)
       end
     end
 
     def []=(key, value)
-      Helpers.construct_child(@impl.update(key, value))
+      # Perform the insertion.
+      @impl.update(key, value)
+    end
+
+    def delete(key)
+      val = self[key]
+      @impl.remove(key)
+      val
     end
 
     def has_key?(key)
       @impl.has_key?(key)
-    end
-
-    def insert(key, value)
-      self[key] = value
     end
 
     def size
@@ -175,8 +204,8 @@ module Dart
 
         # Call our block for each child.
         while it.has_next
-          key = Helpers.construct_child(key_it.unwrap)
-          val = Helpers.construct_child(it.unwrap)
+          key = Helpers.wrap_ffi(key_it.unwrap)
+          val = Helpers.wrap_ffi(it.unwrap)
           y.yield(key, val)
           it.next
           key_it.next
@@ -188,11 +217,19 @@ module Dart
       else enum
       end
     end
+
+    private
+
+    def make_cache
+      Hash.new
+    end
   end
 
   class Array
     include Enumerable
+    include Convert
     include Common
+    include Cached
 
     def initialize(val_or_size = nil, def_val = nil)
       if val_or_size.is_a?(Dart::FFI::Packet) && def_val.nil?
@@ -208,13 +245,13 @@ module Dart
     end
 
     def [](idx)
-      Helpers.construct_child(@impl.lookup(idx))
+      @impl.lookup(idx)
     end
 
     def []=(idx, elem)
       raise ArgumentError, 'Dart Arrays can only index with an integer' unless idx.is_a?(::Fixnum)
       @impl.resize(idx + 1) if idx >= size
-      Helpers.construct_child(@impl.update(idx, elem))
+      @impl.update(idx, elem)
     end
 
     def insert(idx, *elems)
@@ -275,7 +312,7 @@ module Dart
 
         # Call our block for each child.
         while it.has_next
-          y << Helpers.construct_child(it.unwrap)
+          y << Helpers.wrap_ffi(it.unwrap)
           it.next
         end
       end
@@ -285,11 +322,11 @@ module Dart
       else enum
       end
     end
-  end
 
-  module Unwrappable
-    def unwrap
-      @unwrapped ||= @impl.unwrap
+    private
+
+    def make_cache
+      Array.new
     end
   end
 
@@ -319,9 +356,10 @@ module Dart
 
   class Integer
     include Common
+    include Numeric
     include Unwrappable
 
-    def initialize(val)
+    def initialize(val = 0)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
       else
@@ -343,9 +381,10 @@ module Dart
 
   class Decimal
     include Common
+    include Numeric
     include Unwrappable
 
-    def initialize(val)
+    def initialize(val = 0.0)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
       else
@@ -369,7 +408,7 @@ module Dart
     include Common
     include Unwrappable
 
-    def initialize(val)
+    def initialize(val = false)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
       else
@@ -410,11 +449,11 @@ module Dart
   end
 
   def self.from_json(str, finalize = true)
-    Helpers.construct_child(Dart::FFI::Packet.from_json(str, finalize))
+    Helpers.wrap_ffi(Dart::FFI::Packet.from_json(str, finalize))
   end
 
   def self.from_bytes(bytes)
-    Helpers.construct_child(Dart::FFI::Packet.from_bytes(bytes))
+    Helpers.wrap_ffi(Dart::FFI::Packet.from_bytes(bytes))
   end
 
   module Patch
@@ -429,8 +468,27 @@ end
 
 class Hash
   prepend Dart::Patch
+  include Dart::Convert
 end
 
 class Array
   prepend Dart::Patch
+  include Dart::Convert
+end
+
+class String
+  prepend Dart::Patch
+  include Dart::Convert
+end
+
+class Fixnum
+  include Dart::Convert
+end
+
+class Float
+  include Dart::Convert
+end
+
+class NilClass
+  include Dart::Convert
 end

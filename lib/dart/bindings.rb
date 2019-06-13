@@ -308,6 +308,10 @@ module Dart
         get_type == :string
       end
 
+      def int?
+        get_type == :integer
+      end
+
       def dcm?
         get_type == :decimal
       end
@@ -475,21 +479,6 @@ module Dart
 
       #----- Native Memory Helpers -----#
 
-      def self.convert(val)
-        case val
-        when Packet then val
-        when ::Hash then make_obj.tap { |p| val.each_pair { |k, v| p.insert(k, v) } }
-        when ::Array then make_arr.tap { |p| val.each.with_index { |v, i| p.insert(i, v) } }
-        when ::String then make_str(val)
-        when ::Symbol then make_str(val.to_s)
-        when ::Fixnum then make_primitive(val, :int)
-        when ::Float then make_primitive(val, :dcm)
-        when ::TrueClass, ::FalseClass then make_primitive(val ? 1 : 0, :bool)
-        when ::NilClass then make_null
-        else raise TypeError, "Dart cannot convert value of type `#{val.class.name}'"
-        end
-      end
-
       def int_cache
         @int_cache ||= ::FFI::MemoryPointer.new(FFI::Int)
       end
@@ -570,18 +559,18 @@ module Dart
       def mutate(key, val, obj:, arr:)
         # Make sure we've been given something we can use.
         enforce_types(key, object: [::String, ::Symbol], array: ::Fixnum)
+        enforce_types(val, object: Packet, array: Packet)
 
         # Convert the value we've been given to insert it.
         key = key.is_a?(::Symbol) ? key.to_s : key
-        raw_val = self.class.convert(val)
         raising_errors do
           if obj?
-            FFI.send(obj, self, key, key.size, raw_val)
+            FFI.send(obj, self, key, key.size, val)
           else
-            FFI.send(arr, self, key, raw_val)
+            FFI.send(arr, self, key, val)
           end
         end
-        raw_val
+        val
       end
 
       def self.destructor(ptr)

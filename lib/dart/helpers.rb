@@ -1,6 +1,6 @@
 module Dart
   module Helpers
-    def construct_child(raw)
+    def wrap_ffi(raw)
       case raw.get_type
       when :object then Object.new(raw)
       when :array then Array.new(raw)
