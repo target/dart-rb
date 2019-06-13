@@ -2,6 +2,7 @@ module Dart
   module Cached
 
     def [](key)
+      # Make sure the class we're wrapping supports this operation.
       reject unless defined?(super)
 
       # Short circuit our native extensions if we can.
@@ -14,6 +15,7 @@ module Dart
     end
 
     def []=(key, value)
+      # Make sure the class we're wrapping supports this operation.
       reject unless defined?(super)
 
       # Convert our value.
