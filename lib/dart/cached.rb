@@ -77,7 +77,7 @@ module Dart
         raw = to_dart(val)
         [raw, val.is_a?(Dart::Common) ? val : Helpers.wrap_ffi(raw)]
       end
-      if values.is_a?(Array) then values.map(&impl).transpose
+      if values.is_a?(::Array) then values.map(&impl).transpose
       else impl.call(values)
       end
     end

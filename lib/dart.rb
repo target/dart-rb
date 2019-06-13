@@ -99,8 +99,16 @@ module Dart
 
   end
 
+  module Unwrappable
+    def unwrap
+      @unwrapped ||= @impl.unwrap
+    end
+  end
+
+  # God I love ruby sometimes.
+  # This would've taken literally hundreds of lines in C++
   module Numeric
-    ops = %w{ + - / * }.each do |op|
+    ops = %w{ + - * / % ** & | ^ ~ << >> <=> }.each do |op|
       eval <<-METHOD
       def #{op}(num)
         if num.is_a?(Numeric) then unwrap #{op} num.unwrap
@@ -110,14 +118,12 @@ module Dart
       METHOD
     end
 
-    def coerce(num)
-      [dup, num]
+    def -@
+      -unwrap
     end
-  end
 
-  module Unwrappable
-    def unwrap
-      @unwrapped ||= @impl.unwrap
+    def coerce(num)
+      [self, num]
     end
   end
 
@@ -221,7 +227,7 @@ module Dart
     private
 
     def make_cache
-      Hash.new
+      ::Hash.new
     end
   end
 
@@ -229,7 +235,7 @@ module Dart
     include Enumerable
     include Convert
     include Common
-    include Cached
+    prepend Cached
 
     def initialize(val_or_size = nil, def_val = nil)
       if val_or_size.is_a?(Dart::FFI::Packet) && def_val.nil?
@@ -245,7 +251,17 @@ module Dart
     end
 
     def [](idx)
+      # Invert our index if it's negative
+      idx = size + idx if idx < 0
       @impl.lookup(idx)
+    end
+
+    def first
+      self[0]
+    end
+
+    def last
+      self[-1]
     end
 
     def []=(idx, elem)
@@ -326,7 +342,7 @@ module Dart
     private
 
     def make_cache
-      Array.new
+      ::Array.new
     end
   end
 
@@ -465,6 +481,9 @@ module Dart
   end
 
 end
+
+# XXX: Doesn't feel good.
+#----- Monkey Patches -----#
 
 class Hash
   prepend Dart::Patch
