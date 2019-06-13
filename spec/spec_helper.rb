@@ -1,5 +1,5 @@
 require "bundler/setup"
-require "dart"
+require "dart-rb"
 
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure

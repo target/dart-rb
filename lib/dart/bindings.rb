@@ -11,41 +11,19 @@ module Dart
       attach_function :free, [:pointer], :void
     end
 
-    class DartPointer < ::FFI::AutoPointer
-      attr_reader :valid
-      def initialize(*args)
-        # Call our superclass.
-        super(*args)
-
-        # Mark ourselves as uninitialized.
-        @valid = false
-      end
-
-      # Mark the pointer as destroyable.
-      def mark_valid
-        @valid = true
-      end
-    end
-
     # Bootstrap our FFI library
     extend ::FFI::Library
     ffi_lib 'dart_abi'
 
-    class DartStruct < ::FFI::Struct
-      # Hands out a pointer to raw, unconstructed, memory for the
-      # given type.
-      # Pointer must be marked valid after being constructed to free
-      # its memory upon destruction.
+    class DartStruct < ::FFI::ManagedStruct
       def self.alloc
-        DartPointer.new(LibC.malloc(self.size), self.method(:destroy))
+        ptr = LibC.malloc(size)
+        init(ptr)
+        ptr
       end
 
-      # Calls the type specific destructor for the given pointer if
-      # the pointer is valid.
-      # Will be called automatically by pointer returned by alloc
-      # SHOULD NOT BE CALLED DIRECTLY
-      def self.destroy(ptr)
-        self.destructor(ptr) if ptr.valid
+      def self.release(ptr)
+        destructor(ptr)
         LibC.free(ptr)
       end
     end
@@ -112,14 +90,11 @@ module Dart
 
       def unwrap
         # Allocate a raw packet object.
-        ptr = Packet.alloc
+        unwrapped = Packet.new(Packet.alloc)
 
         # Dereference ourself into the packet.
-        raising_errors { FFI.dart_iterator_get_err(ptr, self) }
-        ptr.mark_valid
-
-        # Wrap the pointer and return
-        Packet.new(ptr)
+        raising_errors { FFI.dart_iterator_get_err(unwrapped, self) }
+        unwrapped
       end
 
       def self.bind(pkt)
@@ -127,12 +102,9 @@ module Dart
         raise ArgumentError, 'Dart iterator can only be created from a Dart packet' unless pkt.is_a?(Packet)
 
         # Initialize a raw iterator.
-        ptr = alloc
-        raising_errors { FFI.dart_iterator_init_err(ptr, pkt) }
-        ptr.mark_valid
-
-        # Wrap the pointer and return.
-        new(ptr)
+        bound = Iterator.new(alloc)
+        raising_errors { FFI.dart_iterator_init_from_err(bound.pointer, pkt) }
+        bound
       end
 
       def self.key_bind(pkt)
@@ -140,15 +112,18 @@ module Dart
         raise ArgumentError, 'Dart iterator can only be created from a Dart packet' unless pkt.is_a?(Packet)
 
         # Initialize a raw iterator.
-        ptr = alloc
-        raising_errors { FFI.dart_iterator_init_key_err(ptr, pkt) }
-        ptr.mark_valid
+        bound = Iterator.new(alloc)
+        raising_errors { FFI.dart_iterator_init_key_from_err(bound.pointer, pkt) }
+        bound
+      end
 
-        # Wrap the pointer and return.
-        new(ptr)
+      def self.init(ptr)
+        # Cannot meaningfully fail.
+        FFI.dart_iterator_init_err(ptr)
       end
 
       def self.destructor(ptr)
+        # Cannot meaningfully fail.
         FFI.dart_iterator_destroy(ptr)
       end
     end
@@ -168,18 +143,14 @@ module Dart
 
         # Perform the lookup.
         key = key.is_a?(::Symbol) ? key.to_s : key
-        ptr = self.class.alloc
+        value = Packet.new(self.class.alloc)
         raising_errors do
           if obj?
-            FFI.dart_obj_get_len_err(ptr, self, key, key.size) 
+            FFI.dart_obj_get_len_err(value.pointer, self, key, key.size) 
           else
-            FFI.dart_arr_get_err(ptr, self, key)
+            FFI.dart_arr_get_err(value.pointer, self, key)
           end
         end
-        ptr.mark_valid
-
-        # Wrap the pointer and return.
-        self.class.new(ptr)
       end
 
       def has_key?(key)
@@ -349,16 +320,13 @@ module Dart
         # that we've been asked to do non-finalized parsing.
         # The C api is actually intelligent enough to handle this, so
         # we should be good to go.
-        ptr = alloc
+        parsed = Packet.new(alloc)
         if finalize
-          raising_errors { FFI.dart_from_json_len_err(ptr, str, str.size) }
+          raising_errors { FFI.dart_from_json_len_err(parsed.pointer, str, str.size) }
         else
-          raising_errors { FFI.dart_heap_from_json_len_err(ptr, str, str.size) }
+          raising_errors { FFI.dart_heap_from_json_len_err(parsed.pointer, str, str.size) }
         end
-        ptr.mark_valid
-
-        # Wrap the pointer as a packet and return.
-        new(ptr)
+        parsed
       end
 
       def to_json
@@ -406,22 +374,19 @@ module Dart
         space.put_bytes(0, bytes)
 
         # Attempt to reconstruct our buffer.
-        ptr = alloc
-        raising_errors { FFI.dart_from_bytes_err(ptr, space, bytes.bytesize) }
-        ptr.mark_valid
-        new(ptr)
+        rebuilt = Packet.new(alloc)
+        raising_errors { FFI.dart_from_bytes_err(rebuilt.pointer, space, bytes.bytesize) }
+        rebuilt
       end
 
       #----- API Transition Methods -----#
 
       def lower
         # Allocate a pointer to write our lowered result into.
-        ptr = self.class.alloc
+        lowered = Packet.new(self.class.alloc)
 
         # Lower ourselves
-        raising_errors { FFI.dart_lower_err(ptr, self) }
-        ptr.mark_valid
-        self.class.new(ptr)
+        raising_errors { FFI.dart_lower_err(lowered.pointer, self) }
       end
 
       def finalize
@@ -430,12 +395,10 @@ module Dart
 
       def lift
         # Allocate a pointer to write our lifted result into.
-        ptr = self.class.alloc
+        lifted = Packet.new(self.class.alloc)
 
         # Lift ourselves.
-        raising_errors { FFI.dart_lift_err(ptr, self) }
-        ptr.mark_valid
-        self.class.new(ptr)
+        raising_errors { FFI.dart_lift_err(lifted.pointer, self) }
       end
 
       def definalize
@@ -451,9 +414,8 @@ module Dart
       end
 
       def dup
-        ptr = self.class.alloc
-        raising_errors { FFI.dart_copy_err(ptr, self) }
-        self.class.new(ptr)
+        copy = Packet.new(self.class.alloc)
+        raising_errors { FFI.dart_copy_err(copy.pointer, self) }
       end
 
       def to_s
@@ -495,59 +457,34 @@ module Dart
         @double_cache ||= ::FFI::MemoryPointer.new(FFI::Double)
       end
 
-      def self.alloc_obj
-        ptr = alloc
-        raising_errors { FFI.dart_obj_init_err(ptr) }
-        ptr.mark_valid
-        ptr
-      end
-
       def self.make_obj
-        Packet.new(alloc_obj)
-      end
-
-      def self.alloc_arr
-        ptr = alloc
-        raising_errors { FFI.dart_arr_init_err(ptr) }
-        ptr.mark_valid
-        ptr
+        obj = Packet.new(alloc)
+        raising_errors { FFI.dart_obj_init_err(obj.pointer) }
+        obj
       end
 
       def self.make_arr
-        Packet.new(alloc_arr)
+        arr = Packet.new(alloc)
+        raising_errors { FFI.dart_arr_init_err(arr.pointer) }
+        arr
       end
 
-      def self.alloc_str(str)
-        ptr = alloc
-        raising_errors { FFI.dart_str_init_err(ptr, str, str.size) }
-        ptr.mark_valid
-        ptr
-      end
-
-      def self.make_str(str)
-        Packet.new(alloc_str(str))
-      end
-
-      def self.alloc_primitive(arg, type)
-        ptr = alloc
-        raising_errors { FFI.send("dart_#{type}_init_err", ptr, arg) }
-        ptr.mark_valid
-        ptr
+      def self.make_str(other)
+        str = Packet.new(alloc)
+        raising_errors { FFI.dart_str_init_err(str.pointer, other, other.size) }
+        str
       end
 
       def self.make_primitive(arg, type)
-        Packet.new(alloc_primitive(arg, type))
-      end
-
-      def self.alloc_null
-        ptr = alloc
-        raising_errors { FFI.dart_null_init_err(ptr) }
-        ptr.mark_valid
-        ptr
+        prim = Packet.new(alloc)
+        raising_errors { FFI.send("dart_#{type}_init_err", prim.pointer, arg) }
+        prim
       end
 
       def self.make_null
-        Packet.new(alloc_null)
+        null = Packet.new(alloc)
+        raising_errors { FFI.dart_null_init_err(null.pointer) }
+        null
       end
 
       #----- General Purpose Helpers -----#
@@ -573,7 +510,13 @@ module Dart
         val
       end
 
+      def self.init(ptr)
+        # Cannot meaningfully fail
+        FFI.dart_init_err(ptr);
+      end
+
       def self.destructor(ptr)
+        # Cannot meaningfully fail
         FFI.dart_destroy(ptr)
       end
 
@@ -596,6 +539,7 @@ module Dart
     end
 
     # Attach constructors.
+    attach_function :dart_init_err, [:pointer], ErrorType
     attach_function :dart_copy_err, [:pointer, :pointer], ErrorType
     attach_function :dart_obj_init_err, [:pointer], ErrorType
     attach_function :dart_arr_init_err, [:pointer], ErrorType
@@ -664,8 +608,9 @@ module Dart
     attach_function :dart_from_bytes_err, [:pointer, :pointer, :size_t], ErrorType
 
     # Attach iterator functions.
-    attach_function :dart_iterator_init_err, [:pointer, :pointer], ErrorType
-    attach_function :dart_iterator_init_key_err, [:pointer, :pointer], ErrorType
+    attach_function :dart_iterator_init_err, [:pointer], ErrorType
+    attach_function :dart_iterator_init_from_err, [:pointer, :pointer], ErrorType
+    attach_function :dart_iterator_init_key_from_err, [:pointer, :pointer], ErrorType
     attach_function :dart_iterator_copy_err, [:pointer, :pointer], ErrorType
     attach_function :dart_iterator_move_err, [:pointer, :pointer], ErrorType
     attach_function :dart_iterator_destroy, [:pointer], ErrorType
