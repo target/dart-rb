@@ -34,6 +34,13 @@ RSpec.describe Dart::Object do
   # Generate all other type checks.
   generate_type_tests(binding, except: 'object')
 
+  it 'converts to a hash' do
+    hsh = {'hello' => 'world', 'int' => 1337, 'obj' => {}, 'arr' => []}
+    obj = hsh.to_dart
+    copy = obj.to_h
+    expect(copy).to eq hsh
+  end
+
   it 'starts out empty' do
     expect(subject.empty?).to be true
   end
@@ -152,6 +159,13 @@ RSpec.describe Dart::Array do
 
   # Generate all other type checks.
   generate_type_tests(binding, except: 'array')
+
+  it 'converts to an array' do
+    arr = [0, 1.0, true, {'hello' => 'world'}, [nil]]
+    dart = arr.to_dart
+    copy = dart.to_a
+    expect(copy).to eq arr
+  end
 
   it 'starts out empty' do
     expect(subject.empty?).to be true
