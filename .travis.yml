@@ -2,9 +2,13 @@
 sudo: false
 language: ruby
 cache: bundler
+os: osx
 rvm:
   - 2.3.7
 branches:
   only:
     - master
-before_install: gem install bundler -v 2.0.1
+before_install:
+  - gem install bundler -v 2.0.1
+  - brew tap cfretz244/packages
+  - brew install libdart_dev
