@@ -39,7 +39,7 @@ RSpec.describe Dart::Object do
   end
 
   it 'starts out mutable' do
-    expect(subject.is_finalized).to be false
+    expect(subject.finalized?).to be false
     expect { subject.get_bytes }.to raise_error Dart::StateError
   end
 
@@ -73,6 +73,35 @@ RSpec.describe Dart::Object do
     expect(subject.size).to be 2
   end
 
+  it 'has a default value' do
+    obj = Dart::Object.new(:placeholder)
+    expect(obj[:missing]).to eq 'placeholder'
+  end
+
+  it 'can be cleared' do
+    obj = { str: 'a string', int: 1337, dcm: 6.022, aggr: {} }.to_dart
+    expect(obj.size).to be 4
+    obj.clear
+    expect(obj.empty?).to be true
+    expect(obj[:str]).to eq nil
+    expect(obj[:int]).to eq nil
+    expect(obj[:dcm]).to eq nil
+    expect(obj[:aggr]).to eq nil
+  end
+
+  it 'can be finalized' do
+    obj = { pi: 3.14159, c: 2.99792 }.to_dart.lower
+    expect(obj.finalized?).to be true
+    bytes = obj.get_bytes
+    expect(bytes.encoding).to be ::Encoding::BINARY
+  end
+
+  it 'can be definalized' do
+    obj = Dart.from_json('{"pi":3.14159, "c":2.99792}').lift
+    expect(obj.finalized?).to be false
+    expect { obj.get_bytes }.to raise_error Dart::StateError
+  end
+
   it 'is comparable' do
     another = Dart::Object.new
     expect(subject).to eq another
@@ -95,13 +124,23 @@ RSpec.describe Dart::Object do
     hsh = {'yes' => 'no', 'stop' => 'go', 'hello' => 'goodbye'}
     hsh.each { |k, v| subject[k] = v }
     subject.each { |k, v| expect(v).to eq hsh.delete(k.unwrap) }
-    expect(hsh.empty?).to be true
+
+    copy = subject.dup
+    subject.each { |k, v| expect(v).to eq copy.delete(k.unwrap) }
+    expect(copy.empty?).to be true
   end
 
   it 'caches accessed keys' do
     subject['key'] = 'value'
     value = subject['key']
     expect(subject['key']).to be value
+  end
+
+  it 'can generate json' do
+    obj = { yes: 'no', stop: 'go', answer: 42 }.to_dart
+    json = obj.to_json
+    expect(json.empty?).to be false
+    expect(json.encoding).to be ::Encoding::UTF_8
   end
 end
 
@@ -119,7 +158,7 @@ RSpec.describe Dart::Array do
   end
 
   it 'starts out mutable' do
-    expect(subject.is_finalized).to be false
+    expect(subject.finalized?).to be false
     expect { subject.get_bytes }.to raise_error Dart::StateError
   end
 
@@ -141,6 +180,10 @@ RSpec.describe Dart::Array do
   it 'inserts booleans' do
     subject.push(true)
     expect(subject.first).to eq true
+  end
+
+  it 'handles out of bounds' do
+    expect(subject[1024]).to eq nil
   end
 
   it 'can report its size' do
@@ -177,8 +220,12 @@ RSpec.describe Dart::Array do
   it 'is iterable' do
     arr = %w{ yes no stop go hello goodbye }
     arr.each { |v| subject.push(v) }
-    subject.reverse_each.with_index { |v, i| expect(v).to eq arr.pop }
+    subject.reverse_each { |v| expect(v).to eq arr.pop }
     expect(arr.empty?).to be true
+
+    copy = subject.dup
+    subject.reverse_each { |v| expect(v).to eq copy.pop }
+    expect(copy.empty?).to be true
   end
 
   it 'caches accessed keys' do
