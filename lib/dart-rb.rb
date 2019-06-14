@@ -107,11 +107,11 @@ module Dart
 
   # God I love ruby sometimes.
   # This would've taken literally hundreds of lines in C++
-  module Numeric
-    ops = %w{ + - * / % ** & | ^ ~ << >> <=> }.each do |op|
+  module Arithmetic
+    ops = %w{ + - * / % ** & | ^ <=> }.each do |op|
       eval <<-METHOD
       def #{op}(num)
-        if num.is_a?(Numeric) then unwrap #{op} num.unwrap
+        if num.is_a?(Arithmetic) then unwrap #{op} num.unwrap
         else unwrap #{op} num
         end
       end
@@ -123,7 +123,23 @@ module Dart
     end
 
     def coerce(num)
-      [self, num]
+      [num, unwrap]
+    end
+  end
+
+  module Bitwise
+    ops = %w{ & | ^ }.each do |op|
+      eval <<-METHOD
+      def #{op}(num)
+        if num.is_a?(Bitwise) then unwrap #{op} num.unwrap
+        else unwrap #{op} num
+        end
+      end
+      METHOD
+    end
+
+    def ~
+      ~unwrap
     end
   end
 
@@ -315,7 +331,7 @@ module Dart
       return true if equal?(other)
       case other
       when Array then @impl == other.send(:native)
-      when ::Array then size == other.size && each.with_index { |v, i| return false unless v == other[i] } && true
+      when ::Array then size == other.size && each_with_index { |v, i| return false unless v == other[i] } && true
       else false
       end
     end
@@ -350,7 +366,7 @@ module Dart
     include Common
     include Unwrappable
 
-    def initialize(val)
+    def initialize(val = ::String.new)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
       else
@@ -358,6 +374,18 @@ module Dart
         raise ArgumentError, 'Dart::String can only be constructed from a String' unless val.is_a?(::String)
         @impl = Dart::FFI::Packet.make_str(val)
       end
+    end
+
+    def [](idx)
+      unwrap[idx]
+    end
+
+    def size
+      @impl.size
+    end
+
+    def empty?
+      size == 0
     end
 
     def ==(other)
@@ -372,16 +400,19 @@ module Dart
 
   class Integer
     include Common
-    include Numeric
+    include Bitwise
+    include Arithmetic
     include Unwrappable
+    include ::Comparable
 
     def initialize(val = 0)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
       else
         # Create our implementation as the given integer.
-        raise ArgumentError, 'Dart::Integer can only be constructed from a Fixnum' unless val.is_a?(::Fixnum)
-        @impl = Dart::FFI::Packet.make_primitive(val, :int)
+        raise ArgumentError, 'Dart::Integer can only be constructed from a Numeric type' unless val.is_a?(::Numeric)
+        raise ArgumentError, 'Dart::Integer conversion would lose precision' unless val.to_i == val
+        @impl = Dart::FFI::Packet.make_primitive(val.to_i, :int)
       end
     end
 
@@ -397,16 +428,17 @@ module Dart
 
   class Decimal
     include Common
-    include Numeric
+    include Arithmetic
     include Unwrappable
+    include ::Comparable
 
     def initialize(val = 0.0)
       if val.is_a?(Dart::FFI::Packet)
         @impl = val
       else
         # Create our implementation as the given decimal.
-        raise ArgumentError, 'Dart::Decimal can only be constructed from a Float' unless val.is_a?(::Float)
-        @impl = Dart::FFI::Packet.make_primitive(val, :dcm)
+        raise ArgumentError, 'Dart::Decimal can only be constructed from a Numeric type' unless val.is_a?(::Numeric)
+        @impl = Dart::FFI::Packet.make_primitive(val.to_f, :dcm)
       end
     end
 
