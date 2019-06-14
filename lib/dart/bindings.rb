@@ -103,7 +103,7 @@ module Dart
 
         # Initialize a raw iterator.
         bound = Iterator.new(alloc)
-        raising_errors { FFI.dart_iterator_init_from_err(bound.pointer, pkt) }
+        raising_errors { FFI.dart_iterator_init_from_err(bound, pkt) }
         bound
       end
 
@@ -113,7 +113,7 @@ module Dart
 
         # Initialize a raw iterator.
         bound = Iterator.new(alloc)
-        raising_errors { FFI.dart_iterator_init_key_from_err(bound.pointer, pkt) }
+        raising_errors { FFI.dart_iterator_init_key_from_err(bound, pkt) }
         bound
       end
 
@@ -145,12 +145,11 @@ module Dart
         key = key.is_a?(::Symbol) ? key.to_s : key
         value = Packet.new(self.class.alloc)
         raising_errors do
-          if obj?
-            FFI.dart_obj_get_len_err(value.pointer, self, key, key.size) 
-          else
-            FFI.dart_arr_get_err(value.pointer, self, key)
+          if obj? then FFI.dart_obj_get_len_err(value, self, key, key.size) 
+          else FFI.dart_arr_get_err(value, self, key)
           end
         end
+        value
       end
 
       def has_key?(key)
@@ -181,10 +180,21 @@ module Dart
         # Remove the key.
         key = key.is_a?(::Symbol) ? key.to_s : key
         raising_errors do
-          if obj?
-            FFI.dart_obj_erase_len(self, key, key.size)
-          else
-            FFI.dart_arr_erase(self, key)
+          if obj? then FFI.dart_obj_erase_len(self, key, key.size)
+          else FFI.dart_arr_erase(self, key)
+          end
+        end
+        nil
+      end
+
+      def clear
+        # Make sure this is going to work.
+        enforce_types(nil, object: nil, array: nil)
+
+        # Clear our backend.
+        raising_errors do
+          if obj? then FFI.dart_obj_clear(self)
+          else FFI.dart_arr_clear(self)
           end
         end
         nil
@@ -300,7 +310,7 @@ module Dart
         FFI.dart_get_type(self)
       end
 
-      def is_finalized
+      def finalized?
         # Can't fail.
         FFI.dart_is_finalized(self) != 0
       end
@@ -322,9 +332,9 @@ module Dart
         # we should be good to go.
         parsed = Packet.new(alloc)
         if finalize
-          raising_errors { FFI.dart_from_json_len_err(parsed.pointer, str, str.size) }
+          raising_errors { FFI.dart_from_json_len_err(parsed, str, str.size) }
         else
-          raising_errors { FFI.dart_heap_from_json_len_err(parsed.pointer, str, str.size) }
+          raising_errors { FFI.dart_heap_from_json_len_err(parsed, str, str.size) }
         end
         parsed
       end
@@ -343,6 +353,7 @@ module Dart
         # Read the character pointer into a Ruby string.
         len = FFI::SizeT.new(size)
         str = ptr.read_string(len[:value])
+        str.force_encoding(::Encoding::UTF_8)
         FFI::LibC.free(ptr)
         str
       end
@@ -375,7 +386,7 @@ module Dart
 
         # Attempt to reconstruct our buffer.
         rebuilt = Packet.new(alloc)
-        raising_errors { FFI.dart_from_bytes_err(rebuilt.pointer, space, bytes.bytesize) }
+        raising_errors { FFI.dart_from_bytes_err(rebuilt, space, bytes.bytesize) }
         rebuilt
       end
 
@@ -386,7 +397,8 @@ module Dart
         lowered = Packet.new(self.class.alloc)
 
         # Lower ourselves
-        raising_errors { FFI.dart_lower_err(lowered.pointer, self) }
+        raising_errors { FFI.dart_lower_err(lowered, self) }
+        lowered
       end
 
       def finalize
@@ -398,7 +410,8 @@ module Dart
         lifted = Packet.new(self.class.alloc)
 
         # Lift ourselves.
-        raising_errors { FFI.dart_lift_err(lifted.pointer, self) }
+        raising_errors { FFI.dart_lift_err(lifted, self) }
+        lifted
       end
 
       def definalize
@@ -415,7 +428,8 @@ module Dart
 
       def dup
         copy = Packet.new(self.class.alloc)
-        raising_errors { FFI.dart_copy_err(copy.pointer, self) }
+        raising_errors { FFI.dart_copy_err(copy, self) }
+        copy
       end
 
       def to_s
@@ -459,31 +473,31 @@ module Dart
 
       def self.make_obj
         obj = Packet.new(alloc)
-        raising_errors { FFI.dart_obj_init_err(obj.pointer) }
+        raising_errors { FFI.dart_obj_init_err(obj) }
         obj
       end
 
       def self.make_arr
         arr = Packet.new(alloc)
-        raising_errors { FFI.dart_arr_init_err(arr.pointer) }
+        raising_errors { FFI.dart_arr_init_err(arr) }
         arr
       end
 
       def self.make_str(other)
         str = Packet.new(alloc)
-        raising_errors { FFI.dart_str_init_err(str.pointer, other, other.size) }
+        raising_errors { FFI.dart_str_init_err(str, other, other.size) }
         str
       end
 
       def self.make_primitive(arg, type)
         prim = Packet.new(alloc)
-        raising_errors { FFI.send("dart_#{type}_init_err", prim.pointer, arg) }
+        raising_errors { FFI.send("dart_#{type}_init_err", prim, arg) }
         prim
       end
 
       def self.make_null
         null = Packet.new(alloc)
-        raising_errors { FFI.dart_null_init_err(null.pointer) }
+        raising_errors { FFI.dart_null_init_err(null) }
         null
       end
 
@@ -501,10 +515,8 @@ module Dart
         # Convert the value we've been given to insert it.
         key = key.is_a?(::Symbol) ? key.to_s : key
         raising_errors do
-          if obj?
-            FFI.send(obj, self, key, key.size, val)
-          else
-            FFI.send(arr, self, key, val)
+          if obj? then FFI.send(obj, self, key, key.size, val)
+          else FFI.send(arr, self, key, val)
           end
         end
         val
@@ -559,6 +571,7 @@ module Dart
     attach_function :dart_obj_set_take_dart_len, [:pointer, :string, :size_t, :pointer], ErrorType
 
     # Attach object erase functions.
+    attach_function :dart_obj_clear, [:pointer], ErrorType
     attach_function :dart_obj_erase_len, [:pointer, :string, :size_t], ErrorType
 
     # Attach object retrieval functions.
@@ -574,6 +587,7 @@ module Dart
     attach_function :dart_arr_set_take_dart, [:pointer, :size_t, :pointer], ErrorType
 
     # Attach array erase functions.
+    attach_function :dart_arr_clear, [:pointer], ErrorType
     attach_function :dart_arr_erase, [:pointer, :size_t], ErrorType
 
     # Attach array resize functions.

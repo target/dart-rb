@@ -11,7 +11,9 @@ module Dart
 
       # We didn't have it, but cache whatever our
       # implementation returns.
-      cache[key] = super
+      val = to_dart(super)
+      cache[key] = val if contains?(key)
+      val
     end
 
     def []=(key, value)
@@ -67,6 +69,33 @@ module Dart
       cache.delete_at(key)
     end
 
+    def clear
+      # Make sure the class we're wrapping supports this operation.
+      reject unless defined?(super)
+
+      # Call through to our implementation.
+      super
+
+      # Update our cache.
+      cache.clear
+    end
+
+    def each(&blk)
+      # Run a sync if we need to.
+      unless synced?
+        vals = ::Array.new
+        super do |(k, v)|
+          vals.push(k)
+          vals.push(v) unless v.nil?
+        end
+        @cache = cache.class[*vals]
+        synced
+      end
+      
+      # Perform the iteration.
+      cache.each(&blk)
+    end
+
     private
 
     def reject
@@ -76,8 +105,8 @@ module Dart
 
     def prepare(values)
       impl = proc do |val|
-        raw = to_dart(val)
-        [raw, val.is_a?(Dart::Common) ? val : Helpers.wrap_ffi(raw)]
+        val = to_dart(val)
+        [val.send(:native), val]
       end
       if values.is_a?(::Array) then values.map(&impl).transpose
       else impl.call(values)
@@ -86,6 +115,15 @@ module Dart
 
     def cache
       @cache ||= make_cache
+    end
+
+    def synced?
+      @synced = false if @synced.nil?
+      @synced
+    end
+
+    def synced
+      @synced = true
     end
     
   end

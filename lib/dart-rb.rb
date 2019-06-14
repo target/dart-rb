@@ -75,8 +75,8 @@ module Dart
       @impl.get_type
     end
 
-    def is_finalized
-      @impl.is_finalized
+    def finalized?
+      @impl.finalized?
     end
 
     def get_bytes
@@ -85,6 +85,10 @@ module Dart
 
     def to_s
       @impl.to_s
+    end
+
+    def to_json
+      to_s
     end
 
     def dup
@@ -151,12 +155,13 @@ module Dart
 
     def initialize(val = nil)
       if val.is_a?(Dart::FFI::Packet)
+        @def_val = proc { nil }
         @impl = val
       elsif block_given?
         @def_val = proc { |h, k| yield(h, k) }
         @impl = Dart::FFI::Packet.make_obj
       else
-        @def_val = proc { Helpers.wrap_ffi(Dart::FFI::Packet.convert(val)) }
+        @def_val = proc { val }
         @impl = Dart::FFI::Packet.make_obj
       end
     end
@@ -178,8 +183,13 @@ module Dart
       val
     end
 
+    def clear
+      @impl.clear
+      self
+    end
+
     def has_key?(key)
-      @impl.has_key?(key)
+      contains?(key)
     end
 
     def size
@@ -192,6 +202,7 @@ module Dart
 
     def lower
       @impl = @impl.lower
+      self
     end
 
     def finalize
@@ -200,6 +211,7 @@ module Dart
 
     def lift
       @impl = @impl.lift
+      self
     end
 
     def definalize
@@ -225,17 +237,18 @@ module Dart
         key_it = @impl.key_iterator
 
         # Call our block for each child.
+        args = ::Array.new
         while it.has_next
-          key = Helpers.wrap_ffi(key_it.unwrap)
-          val = Helpers.wrap_ffi(it.unwrap)
-          y.yield(key, val)
+          args[0] = Helpers.wrap_ffi(key_it.unwrap)
+          args[1] = Helpers.wrap_ffi(it.unwrap)
+          y.yield(args)
           it.next
           key_it.next
         end
       end
 
       # Check if we can consume the enumerator.
-      if block_given? then enum.each { |k, v| yield(k, v) } && self
+      if block_given? then enum.each { |a| yield a } && self
       else enum
       end
     end
@@ -244,6 +257,10 @@ module Dart
 
     def make_cache
       ::Hash.new
+    end
+
+    def contains?(key)
+      @impl.has_key?(key)
     end
   end
 
@@ -317,6 +334,11 @@ module Dart
       delete_at(size - 1) unless empty?
     end
 
+    def clear
+      @impl.clear
+      self
+    end
+
     def size
       @impl.size
     end
@@ -359,6 +381,10 @@ module Dart
 
     def make_cache
       ::Array.new
+    end
+
+    def contains?(idx)
+      idx < size
     end
   end
 
