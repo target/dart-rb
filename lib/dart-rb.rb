@@ -253,6 +253,12 @@ module Dart
       end
     end
 
+    def to_h
+      out = ::Hash.new
+      each { |(k, v)| out[k.unwrap] = v }
+      out
+    end
+
     private
 
     def make_cache
@@ -375,6 +381,12 @@ module Dart
       if block_given? then enum.each { |v| yield v } && self
       else enum
       end
+    end
+
+    def to_a
+      out = Array.new
+      each { |v| out.push(v) }
+      out
     end
 
     private
