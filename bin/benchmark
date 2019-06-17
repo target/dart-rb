@@ -1,0 +1,34 @@
+#!/usr/bin/env ruby
+
+$ROOT = File.join(File.expand_path(File.dirname(__FILE__)), '..')
+
+#----- System Requires -----#
+
+require 'bundler/setup'
+require 'optimist'
+require 'dart-rb'
+
+#----- Configuration Logic -----#
+
+opts = Optimist.options do
+  opt :input, 'Newline separated, minified, json file to read from', default: File.join($ROOT, 'data', 'input.json')
+end
+
+#----- Application Logic -----#
+
+# Read our packets in, then spin and print
+start = Time.now
+counter, bytes = 0, 0
+lines = File.foreach(opts[:input]).map { |l| l.chomp }.each
+loop do
+  lines.each { |line| Dart.from_json(line) && (counter += 1) && (bytes += line.size) }
+  lines.rewind
+
+  now = Time.now
+  if now - start >= 1
+    puts "Parsed #{counter} packets/second"
+    puts "Parsed #{bytes.fdiv(1_000_000)} megabytes/second"
+    counter, bytes = 0, 0
+    start = now
+  end
+end
